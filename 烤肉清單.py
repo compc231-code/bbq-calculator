@@ -11,7 +11,7 @@ from gspread_dataframe import set_with_dataframe
 # --- 1. 網頁基本設定 ---
 st.set_page_config(page_title="張家中秋烤肉食材清單", page_icon="🌕", layout="centered")
 
-# --- 2. 高質感 CSS 背景設定 ---
+# --- 2. 注入高質感 CSS ---
 BACKGROUND_IMAGE_PATH = "bg.jpg"
 
 def set_background(image_path):
@@ -29,27 +29,35 @@ def set_background(image_path):
         </style>
         """
         st.markdown(css, unsafe_allow_html=True)
+    else:
+        st.warning("找不到背景圖片 bg.jpg。")
 
 set_background(BACKGROUND_IMAGE_PATH)
 
-# --- 3. Google Sheets 連線與存取設定 ---
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1K9G5Hu6LB_Q8STeD1utuTAEK0KfVLItR/edit"
-SHEET_GID = 1402501142
+# --- 3. Google Sheets 連線設定 ---
+SHEET_URL = "https://docs.google.com/spreadsheets/d/169HMnMNeiz-IDv-e8FgizB7RV4fEX9TkP-Ax6EyMew8/edit"
+SHEET_GID = 0
 
 @st.cache_resource
 def get_gspread_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_json = os.environ.get("GOOGLE_CREDENTIALS")
     
-    if creds_json:
-        creds_dict = json.loads(creds_json)
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        return gspread.authorize(creds)
-    elif os.path.exists("credentials.json"):
-        creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-        return gspread.authorize(creds)
-    else:
-        st.error("⚠️ 找不到 Google 授權憑證！")
+    try:
+        if creds_json:
+            creds_dict = json.loads(creds_json)
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+            return gspread.authorize(creds)
+        elif os.path.exists("credentials.json"):
+            creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+            return gspread.authorize(creds)
+        else:
+            st.error("⚠️ 找不到 Google 授權憑證！請確認是否有設定環境變數或存在 credentials.json 檔案。")
+            return None
+    except Exception as e:
+        error_details = traceback.format_exc()
+        st.error(f"讀取金鑰時發生錯誤：{type(e).__name__} - {str(e)}")
+        st.error(f"詳細錯誤：\n```\n{error_details}\n```")
         return None
 
 def load_data_from_gsheets():
@@ -111,9 +119,8 @@ def load_data_from_gsheets():
             else:
                 return sheet, pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
         except Exception as e:
-            # 加上追蹤器，印出完整的工程錯誤代碼
             error_details = traceback.format_exc()
-            st.error(f"讀取資料失敗：{type(e).__name__} - {str(e)}")
+            st.error(f"讀取雲端資料失敗：{type(e).__name__} - {str(e)}")
             st.error(f"詳細錯誤訊息：\n```\n{error_details}\n```")
     return None, pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
 
@@ -124,11 +131,11 @@ def save_data_to_gsheets(sheet, df):
         return True
     except Exception as e:
         error_details = traceback.format_exc()
-        st.error(f"寫入雲端時發生錯誤：{e}")
+        st.error(f"寫入雲端時發生錯誤：{type(e).__name__} - {str(e)}")
         st.error(f"詳細錯誤訊息：\n```\n{error_details}\n```")
         return False
 
-# 初始化載入資料
+# --- 4. 主要內容與介面區塊 ---
 if 'food_list' not in st.session_state or 'sheet_obj' not in st.session_state:
     sheet_obj, df = load_data_from_gsheets()
     st.session_state.sheet_obj = sheet_obj
@@ -137,13 +144,14 @@ if 'food_list' not in st.session_state or 'sheet_obj' not in st.session_state:
 with st.sidebar:
     st.markdown("### 雲端同步控制")
     if st.button("🔄 從雲端重新讀取"):
+        st.cache_resource.clear()
         sheet_obj, df = load_data_from_gsheets()
         st.session_state.sheet_obj = sheet_obj
         st.session_state.food_list = df
         st.success("✅ 已重新讀取雲端最新狀態！")
         st.rerun()
 
-st.title("🌕 張家中秋烤肉食材清單")
+st.title("🌕 嘉嘉老師的中秋烤肉食材清單")
 st.caption("🟢 目前狀態：【雙向同步啟動】已連線至 Google 雲端")
 st.write("---")
 
