@@ -33,7 +33,7 @@ def set_background(image_path):
 
 set_background(BACKGROUND_IMAGE_PATH)
 
-# --- 3. Google Sheets 連線設定 ---
+# --- 3. Google Sheets 連線與存取設定 ---
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1K9G5Hu6LB_Q8STeD1utuTAEK0KfVLItR/edit"
 
 @st.cache_resource
@@ -49,7 +49,7 @@ def get_gspread_client():
         creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
         return gspread.authorize(creds)
     else:
-        st.error("⚠️ 找不到 Google 授權憑證！請確認是否已在 Render 設定環境變數。")
+        st.error("⚠️ 找不到 Google 授權憑證！")
         return None
 
 def load_data_from_gsheets():
@@ -62,36 +62,36 @@ def load_data_from_gsheets():
             if not raw_values:
                 return sheet, pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
 
-            # 【關鍵升級】動態尋找標題列，不綁死在第幾列
             header_idx = -1
             for i, row in enumerate(raw_values):
-                if '食材' in row and '內容' in row and '價格' in row:
+                if '食材' in row and '價格' in row:
                     header_idx = i
                     break
             
             if header_idx != -1:
                 headers = raw_values[header_idx]
+                idx_buy = headers.index('已購買') if '已購買' in headers else -1
                 idx_name = headers.index('食材')
-                idx_desc = headers.index('內容')
+                idx_desc = headers.index('內容') if '內容' in headers else -1
                 idx_price = headers.index('價格')
                 
                 extracted_data = []
                 for r in raw_values[header_idx + 1:]:
-                    # 防止某些列長度不夠導致錯誤
+                    buy_val = r[idx_buy] if idx_buy != -1 and idx_buy < len(r) else ""
                     name_val = r[idx_name] if idx_name < len(r) else ""
-                    desc_val = r[idx_desc] if idx_desc < len(r) else ""
+                    desc_val = r[idx_desc] if idx_desc != -1 and idx_desc < len(r) else ""
                     price_val = r[idx_price] if idx_price < len(r) else "0"
-                    extracted_data.append([name_val, desc_val, price_val])
+                    extracted_data.append([buy_val, name_val, desc_val, price_val])
                 
-                df = pd.DataFrame(extracted_data, columns=["食材", "內容", "價格"])
+                df = pd.DataFrame(extracted_data, columns=["已購買", "食材", "內容", "價格"])
                 df = df[df['食材'].astype(str).str.strip() != '']
                 
-                # 清理價格欄位 (去除逗號、轉為數字)
+                # 欄位整理
+                df['已購買'] = df['已購買'].astype(str).str.upper().map({'TRUE': True, 'FALSE': False, '1': True, '0': False}).fillna(False)
                 df['價格'] = df['價格'].astype(str).str.replace(',', '', regex=False)
                 df['價格'] = pd.to_numeric(df['價格'], errors='coerce').fillna(0).astype(int)
-                df.insert(0, '已購買', df['價格'] > 0)
                 
-                # 動態抓取預算與人數
+                # 抓取預算與人數設定
                 budget_val, people_val = 6000, 12
                 for row in raw_values:
                     if '總預算' in row:
@@ -110,11 +110,21 @@ def load_data_from_gsheets():
                 
                 return sheet, df.reset_index(drop=True)
             else:
-                st.error("❌ 找不到包含 '食材', '內容', '價格' 的標題列！請確認試算表中這些字沒有打錯。")
                 return sheet, pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
         except Exception as e:
-            st.error(f"處理試算表資料失敗：{type(e).__name__} - {str(e)}")
+            st.error(f"讀取資料失敗：{type(e).__name__} - {str(e)}")
     return None, pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
+
+def save_data_to_gsheets(sheet, df):
+    try:
+        # 【局部更新技術】只清空 A 到 D 欄，保護你在右邊設計的預算欄位不被洗掉
+        sheet.batch_clear(["A:D"])
+        # 寫入最新的資料 (固定從 A1 儲存格開始寫入)
+        set_with_dataframe(sheet, df, row=1, col=1, include_index=False, include_column_header=True)
+        return True
+    except Exception as e:
+        st.error(f"寫入雲端時發生錯誤：{e}")
+        return False
 
 # 初始化載入資料
 if 'food_list' not in st.session_state or 'sheet_obj' not in st.session_state:
@@ -123,17 +133,17 @@ if 'food_list' not in st.session_state or 'sheet_obj' not in st.session_state:
     st.session_state.food_list = df
 
 with st.sidebar:
-    st.markdown("### 雲端控制")
-    if st.button("🔄 從雲端重新載入"):
+    st.markdown("### 雲端同步控制")
+    if st.button("🔄 從雲端重新讀取"):
         sheet_obj, df = load_data_from_gsheets()
         st.session_state.sheet_obj = sheet_obj
         st.session_state.food_list = df
-        st.success("✅ 已取得雲端最新資料！")
+        st.success("✅ 已重新讀取雲端最新狀態！")
         st.rerun()
 
 # --- 4. 主要內容與介面 ---
 st.title("🌕 張家中秋烤肉食材清單")
-st.caption("🟢 目前狀態：已與 Google 雲端連線 (唯讀模式)")
+st.caption("🟢 目前狀態：【雙向同步啟動】已連線至 Google 雲端")
 st.write("---")
 
 st.header("💰 預算與人數")
@@ -145,7 +155,7 @@ with col2:
 
 st.write("---")
 st.header("📋 採買清單")
-st.caption("✨ 提示：修改表格內容後，可自動計算總額。")
+st.caption("✨ 提示：修改數量、價格或打勾後，請務必點擊下方按鈕存檔。")
 
 edited_df = st.data_editor(
     st.session_state.food_list,
@@ -160,7 +170,16 @@ edited_df = st.data_editor(
     width='stretch',
     key="food_editor"
 )
-st.session_state.food_list = edited_df
+
+# 雲端儲存按鈕
+if st.button("☁️ 儲存修改並同步至雲端", type="primary"):
+    if st.session_state.sheet_obj:
+        is_saved = save_data_to_gsheets(st.session_state.sheet_obj, edited_df)
+        if is_saved:
+            st.session_state.food_list = edited_df
+            st.success("✅ 修改已成功寫回 Google 試算表！")
+    else:
+        st.error("❌ 找不到試算表物件，無法存檔。")
 
 st.write("---")
 st.header("🛒 新增額外食材")
@@ -182,7 +201,12 @@ with st.form("add_item_form", clear_on_submit=True):
             warning_placeholder.error(f"⚠️ 項目重複，『{i_name}』已在購買清單內！")
         else:
             new_row = pd.DataFrame({"已購買": [True if i_price > 0 else False], "食材": [i_name.strip()], "內容": [i_desc], "價格": [i_price]})
-            st.session_state.food_list = pd.concat([st.session_state.food_list, new_row], ignore_index=True)
+            updated_df = pd.concat([st.session_state.food_list, new_row], ignore_index=True)
+            st.session_state.food_list = updated_df
+            
+            # 新增食材也直接同步到雲端
+            if st.session_state.sheet_obj:
+                save_data_to_gsheets(st.session_state.sheet_obj, updated_df)
             st.rerun()
 
 # --- 5. 費用計算與顯示 ---
