@@ -1,118 +1,114 @@
 import streamlit as st
 import pandas as pd
 import os
+import json
 import base64
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from gspread_dataframe import set_with_dataframe
 
 # --- 1. 網頁基本設定 ---
 st.set_page_config(page_title="張家中秋烤肉食材清單", page_icon="🌕", layout="centered")
 
-# --- 2. 注入高質感 CSS ---
+# --- 2. 高質感 CSS 背景設定 ---
 BACKGROUND_IMAGE_PATH = "bg.jpg"
 
 def set_background(image_path):
     if os.path.exists(image_path):
         with open(image_path, "rb") as f:
             encoded_string = base64.b64encode(f.read()).decode()
-        
         css = f"""
         <style>
-        .stApp {{
-            background-image: url(data:image/jpeg;base64,{encoded_string});
-            background-size: cover;
-            background-position: center;
-            background-attachment: fixed;
-        }}
-        
-        .block-container {{
-            background-color: rgba(15, 20, 25, 0.35) !important;
-            padding: 1.5rem 1rem !important;
-            border-radius: 16px !important;
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.7) !important;
-            backdrop-filter: blur(8px) !important;
-            -webkit-backdrop-filter: blur(8px) !important;
-            margin-top: 1.5rem !important;
-            margin-bottom: 1.5rem !important;
-            border: 1px solid rgba(255, 255, 255, 0.15) !important;
-        }}
-        
-        header {{ background-color: transparent !important; }}
-        footer {{ visibility: hidden; }}
-        
-        h1, h2, h3, p, span, div, label {{
-            color: #F0F2F6 !important;
-            text-shadow: 1px 1px 4px rgba(0,0,0,0.9) !important;
-        }}
-        
-        button p, button span, button div {{
-            color: #1F2937 !important; 
-            font-weight: bold !important;
-            text-shadow: none !important; 
-        }}
-        
-        input, .stDataFrame {{
-            background-color: rgba(255, 255, 255, 0.1) !important;
-        }}
+        .stApp {{ background-image: url(data:image/jpeg;base64,{encoded_string}); background-size: cover; background-position: center; background-attachment: fixed; }}
+        .block-container {{ background-color: rgba(15, 20, 25, 0.35) !important; padding: 1.5rem 1rem !important; border-radius: 16px !important; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.7) !important; backdrop-filter: blur(8px) !important; -webkit-backdrop-filter: blur(8px) !important; margin-top: 1.5rem !important; margin-bottom: 1.5rem !important; border: 1px solid rgba(255, 255, 255, 0.15) !important; }}
+        header {{ background-color: transparent !important; }} footer {{ visibility: hidden; }}
+        h1, h2, h3, p, span, div, label {{ color: #F0F2F6 !important; text-shadow: 1px 1px 4px rgba(0,0,0,0.9) !important; }}
+        button p, button span, button div {{ color: #1F2937 !important; font-weight: bold !important; text-shadow: none !important; }}
+        input, .stDataFrame {{ background-color: rgba(255, 255, 255, 0.1) !important; }}
         </style>
         """
         st.markdown(css, unsafe_allow_html=True)
     else:
-        st.warning("找不到背景圖片 bg.jpg，請確認已將圖片放置於同一個資料夾內。")
+        st.warning("找不到背景圖片 bg.jpg。")
 
 set_background(BACKGROUND_IMAGE_PATH)
 
-# --- 3. 讀取 Excel 的功能 ---
-FILE_PATH = "烤肉清單.xlsx"
+# --- 3. Google Sheets 連線設定 ---
+# 【修改處】請把這串換成你自己的 Google 試算表網址！
+SHEET_URL = "https://docs.google.com/spreadsheets/d/bbq-app@bbq-app-509415.iam.gserviceaccount.com/edit"
 
-def load_excel_data():
-    if os.path.exists(FILE_PATH):
-        try:
-            df_excel = pd.read_excel(FILE_PATH, sheet_name='工作表1')
-            df_items = df_excel[['Unnamed: 2', 'Unnamed: 3', 'Unnamed: 4']].iloc[1:].copy()
-            df_items.columns = ['食材', '內容', '價格']
-            df_items = df_items.dropna(subset=['食材'])
-            df_items['價格'] = pd.to_numeric(df_items['價格'], errors='coerce').fillna(0).astype(int)
-            df_items.insert(0, '已購買', df_items['價格'] > 0)
-            st.session_state.food_list = df_items.reset_index(drop=True)
-            
-            try:
-                st.session_state.pay_people_default = int(df_excel['Unnamed: 7'].iloc[1])
-                st.session_state.total_budget_default = int(df_excel['Unnamed: 7'].iloc[3])
-            except:
-                st.session_state.pay_people_default = 12
-                st.session_state.total_budget_default = 6000
-        except Exception as e:
-            st.error(f"讀取 Excel 發生錯誤：{e}")
-            st.session_state.food_list = pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
+@st.cache_resource
+def get_gspread_client():
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    # 這裡會去抓 Render 上設定好的環境變數 (稍後設定)
+    creds_json = os.environ.get("GOOGLE_CREDENTIALS")
+    
+    if creds_json:
+        creds_dict = json.loads(creds_json)
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        return gspread.authorize(creds)
+    elif os.path.exists("credentials.json"):
+        # 讓你在本機測試用 (把下載的 JSON 檔改名為 credentials.json 放在同資料夾)
+        creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+        return gspread.authorize(creds)
     else:
-        st.error(f"找不到檔案：{FILE_PATH}")
-        st.session_state.food_list = pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
+        st.error("⚠️ 找不到 Google 授權憑證！")
+        return None
 
-if 'food_list' not in st.session_state:
-    load_excel_data()
+def load_data_from_gsheets():
+    client = get_gspread_client()
+    if client:
+        try:
+            sheet = client.open_by_url(SHEET_URL).sheet1
+            data = sheet.get_all_records()
+            if data:
+                df = pd.DataFrame(data)
+                # 確保型態正確
+                if '已購買' in df.columns:
+                    df['已購買'] = df['已購買'].map({'TRUE': True, 'FALSE': False, True: True, False: False}).fillna(False)
+                df['價格'] = pd.to_numeric(df['價格'], errors='coerce').fillna(0).astype(int)
+                return sheet, df
+            else:
+                return sheet, pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
+        except Exception as e:
+            st.error(f"讀取試算表失敗：{e}")
+    return None, pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
+
+def save_data_to_gsheets(sheet, df):
+    sheet.clear() # 清空原本內容
+    set_with_dataframe(sheet, df) # 寫入最新內容
+
+# 初始化載入資料
+if 'food_list' not in st.session_state or 'sheet_obj' not in st.session_state:
+    sheet_obj, df = load_data_from_gsheets()
+    st.session_state.sheet_obj = sheet_obj
+    st.session_state.food_list = df
 
 with st.sidebar:
-    st.markdown("### 資料控制")
-    if st.button("🔄 強制從 Excel 重新載入"):
-        load_excel_data()
-        st.success("✅ 資料已重新載入！")
+    st.markdown("### 雲端控制")
+    if st.button("🔄 從雲端重新載入"):
+        sheet_obj, df = load_data_from_gsheets()
+        st.session_state.sheet_obj = sheet_obj
+        st.session_state.food_list = df
+        st.success("✅ 已取得雲端最新資料！")
         st.rerun()
 
 # --- 4. 主要內容與介面 ---
 st.title("🌕 張家中秋烤肉食材清單")
+st.caption("🟢 目前狀態：已與 Google 雲端連線")
 st.write("---")
 
 st.header("💰 預算與人數")
 col1, col2 = st.columns(2)
 with col1:
-    total_budget = st.number_input("總預算 (元)", min_value=0, value=st.session_state.get('total_budget_default', 6000), step=100)
+    total_budget = st.number_input("總預算 (元)", min_value=0, value=6000, step=100)
 with col2:
-    pay_people = st.number_input("付錢人數", min_value=1, value=st.session_state.get('pay_people_default', 12), step=1)
+    pay_people = st.number_input("付錢人數", min_value=1, value=12, step=1)
 
 st.write("---")
 st.header("📋 採買清單")
-st.caption("✨ 提示：可直接在表格內雙擊修改名稱、內容與價格，系統會自動儲存並計算！")
+st.caption("✨ 提示：修改表格內容後，請務必點擊下方的「☁️ 儲存並同步至雲端」！")
 
-# 確保表格所有欄位都可編輯，並允許動態增減列
 edited_df = st.data_editor(
     st.session_state.food_list,
     column_config={
@@ -126,11 +122,18 @@ edited_df = st.data_editor(
     width='stretch',
     key="food_editor"
 )
-st.session_state.food_list = edited_df
+
+# 加入手動雲端儲存按鈕
+if st.button("☁️ 儲存並同步至雲端"):
+    if st.session_state.sheet_obj:
+        save_data_to_gsheets(st.session_state.sheet_obj, edited_df)
+        st.session_state.food_list = edited_df
+        st.success("✅ 修改已成功儲存至 Google 試算表！")
+    else:
+        st.error("無法儲存，未連接到試算表。")
 
 st.write("---")
 st.header("🛒 新增額外食材")
-
 warning_placeholder = st.empty()
 
 with st.form("add_item_form", clear_on_submit=True):
@@ -150,10 +153,13 @@ with st.form("add_item_form", clear_on_submit=True):
         else:
             new_row = pd.DataFrame({"已購買": [True if i_price > 0 else False], "食材": [i_name.strip()], "內容": [i_desc], "價格": [i_price]})
             st.session_state.food_list = pd.concat([st.session_state.food_list, new_row], ignore_index=True)
+            # 新增後自動同步雲端
+            if st.session_state.sheet_obj:
+                save_data_to_gsheets(st.session_state.sheet_obj, st.session_state.food_list)
             st.rerun()
 
 # --- 5. 費用計算與顯示 ---
-total_cost = st.session_state.food_list["價格"].sum() if not st.session_state.food_list.empty else 0
+total_cost = edited_df["價格"].sum() if not edited_df.empty else 0
 per_person_cost = total_cost / pay_people if pay_people > 0 else 0
 remaining_budget = total_budget - total_cost
 
