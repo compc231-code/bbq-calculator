@@ -23,7 +23,6 @@ def set_background(image_path):
             background-attachment: fixed;
         }}
         
-        /* 升級版毛玻璃：提高透明度、縮小留白、加入邊框反光 */
         .block-container {{
             background-color: rgba(15, 20, 25, 0.35) !important;
             padding: 1.5rem 1rem !important;
@@ -39,20 +38,17 @@ def set_background(image_path):
         header {{ background-color: transparent !important; }}
         footer {{ visibility: hidden; }}
         
-        /* 為了防止背景食物顏色干擾閱讀，加上文字黑色陰影 */
         h1, h2, h3, p, span, div, label {{
             color: #F0F2F6 !important;
             text-shadow: 1px 1px 4px rgba(0,0,0,0.9) !important;
         }}
         
-        /* 按鈕文字維持深色，且不需要陰影 */
         button p, button span, button div {{
             color: #1F2937 !important; 
             font-weight: bold !important;
             text-shadow: none !important; 
         }}
         
-        /* 微調輸入框與表格的底色，使其微透但依然好辨識 */
         input, .stDataFrame {{
             background-color: rgba(255, 255, 255, 0.1) !important;
         }}
@@ -114,19 +110,21 @@ with col2:
 
 st.write("---")
 st.header("📋 採買清單")
-st.caption("✨ 提示：可直接在表格內打勾並修改名稱、內容與價格，系統會自動儲存並計算！")
+st.caption("✨ 提示：可直接在表格內雙擊修改名稱、內容與價格，系統會自動儲存並計算！")
 
-# 【修改處】拿掉了 disabled=["食材", "內容"]，現在整個表格都可以直接點擊編輯了
+# 確保表格所有欄位都可編輯，並允許動態增減列
 edited_df = st.data_editor(
     st.session_state.food_list,
     column_config={
         "已購買": st.column_config.CheckboxColumn("已買?", default=False),
-        "食材": st.column_config.TextColumn("食材"),
+        "食材": st.column_config.TextColumn("食材", required=True),
         "內容": st.column_config.TextColumn("內容"),
         "價格": st.column_config.NumberColumn("價格 (元)", min_value=0, step=10),
     },
+    num_rows="dynamic",
     hide_index=True,
-    width='stretch'
+    width='stretch',
+    key="food_editor"
 )
 st.session_state.food_list = edited_df
 
