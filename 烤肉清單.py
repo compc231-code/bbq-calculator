@@ -57,72 +57,64 @@ def load_data_from_gsheets():
     if client:
         try:
             sheet = client.open_by_url(SHEET_URL).sheet1
-            
-            # 【關鍵修正】取得所有儲存格的原始資料 (回傳的是二維陣列)
             raw_values = sheet.get_all_values()
             
-            # 如果試算表至少有兩列 (包含標題列)
-            if len(raw_values) > 1:
-                # 你的表格標題在第二列 (索引為1)
-                headers = raw_values[1] 
+            if not raw_values:
+                return sheet, pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
+
+            # 【關鍵升級】動態尋找標題列，不綁死在第幾列
+            header_idx = -1
+            for i, row in enumerate(raw_values):
+                if '食材' in row and '內容' in row and '價格' in row:
+                    header_idx = i
+                    break
+            
+            if header_idx != -1:
+                headers = raw_values[header_idx]
+                idx_name = headers.index('食材')
+                idx_desc = headers.index('內容')
+                idx_price = headers.index('價格')
                 
-                # 將剩下的列當作資料
-                data_rows = raw_values[2:] 
+                extracted_data = []
+                for r in raw_values[header_idx + 1:]:
+                    # 防止某些列長度不夠導致錯誤
+                    name_val = r[idx_name] if idx_name < len(r) else ""
+                    desc_val = r[idx_desc] if idx_desc < len(r) else ""
+                    price_val = r[idx_price] if idx_price < len(r) else "0"
+                    extracted_data.append([name_val, desc_val, price_val])
                 
-                # 建立 DataFrame
-                df_all = pd.DataFrame(data_rows, columns=headers)
+                df = pd.DataFrame(extracted_data, columns=["食材", "內容", "價格"])
+                df = df[df['食材'].astype(str).str.strip() != '']
                 
-                # 萃取我們需要的欄位：食材、內容、價格 (你的圖上是 C, D, E 欄)
-                # 為了避免空白或其他雜訊，我們特別指定這三欄
-                if set(['食材', '內容', '價格']).issubset(df_all.columns):
-                    df = df_all[['食材', '內容', '價格']].copy()
-                    
-                    # 清除「食材」為空值的行
-                    df = df[df['食材'].astype(str).str.strip() != '']
-                    
-                    # 處理價格欄位，將非數字轉為 0
-                    df['價格'] = pd.to_numeric(df['價格'], errors='coerce').fillna(0).astype(int)
-                    
-                    # 判斷是否已購買 (原本 Excel 並沒有這欄，我們由程式自動產生)
-                    # 如果價格 > 0 就視為已買，否則為 False
-                    df.insert(0, '已購買', df['價格'] > 0)
-                    
-                    # 嘗試抓取預算與人數設定
-                    try:
-                        # 總預算：尋找包含 '總預算' 的那一列的右邊一格
-                        budget_val = 6000 # 預設
-                        people_val = 12   # 預設
-                        for row in raw_values:
-                            if '總預算' in row:
-                                idx = row.index('總預算')
-                                if idx + 1 < len(row):
-                                    budget_val = int(str(row[idx+1]).replace(',', ''))
-                            if '付錢人數' in row:
-                                idx = row.index('付錢人數')
-                                if idx + 1 < len(row):
-                                    people_val = int(row[idx+1])
-                        
-                        st.session_state.pay_people_default = people_val
-                        st.session_state.total_budget_default = budget_val
-                    except Exception as e:
-                        print("讀取預算設定時發生小錯誤:", e)
-                        st.session_state.pay_people_default = 12
-                        st.session_state.total_budget_default = 6000
-                    
-                    return sheet, df.reset_index(drop=True)
-                else:
-                     st.error("試算表找不到指定的欄位名稱('食材', '內容', '價格')，請確認第二列的標題是否正確。")
-                     return sheet, pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
+                # 清理價格欄位 (去除逗號、轉為數字)
+                df['價格'] = df['價格'].astype(str).str.replace(',', '', regex=False)
+                df['價格'] = pd.to_numeric(df['價格'], errors='coerce').fillna(0).astype(int)
+                df.insert(0, '已購買', df['價格'] > 0)
+                
+                # 動態抓取預算與人數
+                budget_val, people_val = 6000, 12
+                for row in raw_values:
+                    if '總預算' in row:
+                        idx = row.index('總預算')
+                        if idx + 1 < len(row):
+                            val = str(row[idx+1]).replace(',', '').strip()
+                            if val.isdigit(): budget_val = int(val)
+                    if '付錢人數' in row:
+                        idx = row.index('付錢人數')
+                        if idx + 1 < len(row):
+                            val = str(row[idx+1]).replace(',', '').strip()
+                            if val.isdigit(): people_val = int(val)
+                
+                st.session_state.pay_people_default = people_val
+                st.session_state.total_budget_default = budget_val
+                
+                return sheet, df.reset_index(drop=True)
             else:
+                st.error("❌ 找不到包含 '食材', '內容', '價格' 的標題列！請確認試算表中這些字沒有打錯。")
                 return sheet, pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
         except Exception as e:
-            st.error(f"處理試算表資料失敗：{e}")
+            st.error(f"處理試算表資料失敗：{type(e).__name__} - {str(e)}")
     return None, pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
-
-# 【重要修正】因為你的 Google Sheet 格式比較複雜 (旁邊有其他資訊)，
-# 為了避免覆蓋掉你的「付錢人數」、「總預算」等欄位，
-# 我們將存檔功能改為「唯讀」加上「僅本地更新」，或是你需要我們重新設計一個乾淨的 Sheet 來專門儲存？
-# 目前先將存檔功能註解掉，確保網頁能順利讀出資料。
 
 # 初始化載入資料
 if 'food_list' not in st.session_state or 'sheet_obj' not in st.session_state:
@@ -141,7 +133,7 @@ with st.sidebar:
 
 # --- 4. 主要內容與介面 ---
 st.title("🌕 張家中秋烤肉食材清單")
-st.caption("🟢 目前狀態：已讀取 Google 雲端資料")
+st.caption("🟢 目前狀態：已與 Google 雲端連線 (唯讀模式)")
 st.write("---")
 
 st.header("💰 預算與人數")
@@ -153,7 +145,7 @@ with col2:
 
 st.write("---")
 st.header("📋 採買清單")
-st.caption("✨ 提示：修改表格內容後，可自動計算。 (目前版本為雲端讀取版)")
+st.caption("✨ 提示：修改表格內容後，可自動計算總額。")
 
 edited_df = st.data_editor(
     st.session_state.food_list,
