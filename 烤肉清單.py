@@ -33,8 +33,10 @@ def set_background(image_path):
 
 set_background(BACKGROUND_IMAGE_PATH)
 
-# --- 3. Google Sheets 連線與存取設定 ---
+# --- 3. Google Sheets 連線設定 ---
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1K9G5Hu6LB_Q8STeD1utuTAEK0KfVLItR/edit"
+# 將你的 gid 記錄下來
+SHEET_GID = 1402501142
 
 @st.cache_resource
 def get_gspread_client():
@@ -56,12 +58,16 @@ def load_data_from_gsheets():
     client = get_gspread_client()
     if client:
         try:
-            sheet = client.open_by_url(SHEET_URL).sheet1
+            # 【關鍵修改】透過 URL 開啟，並精準鎖定你指定的 gid 分頁！
+            spreadsheet = client.open_by_url(SHEET_URL)
+            sheet = spreadsheet.get_worksheet_by_id(SHEET_GID)
+            
             raw_values = sheet.get_all_values()
             
             if not raw_values:
                 return sheet, pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
 
+            # 動態尋找標題列
             header_idx = -1
             for i, row in enumerate(raw_values):
                 if '食材' in row and '價格' in row:
@@ -86,12 +92,10 @@ def load_data_from_gsheets():
                 df = pd.DataFrame(extracted_data, columns=["已購買", "食材", "內容", "價格"])
                 df = df[df['食材'].astype(str).str.strip() != '']
                 
-                # 欄位整理
                 df['已購買'] = df['已購買'].astype(str).str.upper().map({'TRUE': True, 'FALSE': False, '1': True, '0': False}).fillna(False)
                 df['價格'] = df['價格'].astype(str).str.replace(',', '', regex=False)
                 df['價格'] = pd.to_numeric(df['價格'], errors='coerce').fillna(0).astype(int)
                 
-                # 抓取預算與人數設定
                 budget_val, people_val = 6000, 12
                 for row in raw_values:
                     if '總預算' in row:
@@ -117,16 +121,13 @@ def load_data_from_gsheets():
 
 def save_data_to_gsheets(sheet, df):
     try:
-        # 【局部更新技術】只清空 A 到 D 欄，保護你在右邊設計的預算欄位不被洗掉
         sheet.batch_clear(["A:D"])
-        # 寫入最新的資料 (固定從 A1 儲存格開始寫入)
         set_with_dataframe(sheet, df, row=1, col=1, include_index=False, include_column_header=True)
         return True
     except Exception as e:
         st.error(f"寫入雲端時發生錯誤：{e}")
         return False
 
-# 初始化載入資料
 if 'food_list' not in st.session_state or 'sheet_obj' not in st.session_state:
     sheet_obj, df = load_data_from_gsheets()
     st.session_state.sheet_obj = sheet_obj
@@ -141,7 +142,6 @@ with st.sidebar:
         st.success("✅ 已重新讀取雲端最新狀態！")
         st.rerun()
 
-# --- 4. 主要內容與介面 ---
 st.title("🌕 張家中秋烤肉食材清單")
 st.caption("🟢 目前狀態：【雙向同步啟動】已連線至 Google 雲端")
 st.write("---")
@@ -171,7 +171,6 @@ edited_df = st.data_editor(
     key="food_editor"
 )
 
-# 雲端儲存按鈕
 if st.button("☁️ 儲存修改並同步至雲端", type="primary"):
     if st.session_state.sheet_obj:
         is_saved = save_data_to_gsheets(st.session_state.sheet_obj, edited_df)
@@ -203,13 +202,10 @@ with st.form("add_item_form", clear_on_submit=True):
             new_row = pd.DataFrame({"已購買": [True if i_price > 0 else False], "食材": [i_name.strip()], "內容": [i_desc], "價格": [i_price]})
             updated_df = pd.concat([st.session_state.food_list, new_row], ignore_index=True)
             st.session_state.food_list = updated_df
-            
-            # 新增食材也直接同步到雲端
             if st.session_state.sheet_obj:
                 save_data_to_gsheets(st.session_state.sheet_obj, updated_df)
             st.rerun()
 
-# --- 5. 費用計算與顯示 ---
 total_cost = edited_df["價格"].sum() if not edited_df.empty else 0
 per_person_cost = total_cost / pay_people if pay_people > 0 else 0
 remaining_budget = total_budget - total_cost
