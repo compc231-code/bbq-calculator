@@ -4,6 +4,7 @@ import os
 import json
 import base64
 import gspread
+import traceback
 from oauth2client.service_account import ServiceAccountCredentials
 from gspread_dataframe import set_with_dataframe
 
@@ -28,14 +29,11 @@ def set_background(image_path):
         </style>
         """
         st.markdown(css, unsafe_allow_html=True)
-    else:
-        st.warning("找不到背景圖片 bg.jpg。")
 
 set_background(BACKGROUND_IMAGE_PATH)
 
-# --- 3. Google Sheets 連線設定 ---
+# --- 3. Google Sheets 連線與存取設定 ---
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1K9G5Hu6LB_Q8STeD1utuTAEK0KfVLItR/edit"
-# 將你的 gid 記錄下來
 SHEET_GID = 1402501142
 
 @st.cache_resource
@@ -58,16 +56,13 @@ def load_data_from_gsheets():
     client = get_gspread_client()
     if client:
         try:
-            # 【關鍵修改】透過 URL 開啟，並精準鎖定你指定的 gid 分頁！
             spreadsheet = client.open_by_url(SHEET_URL)
             sheet = spreadsheet.get_worksheet_by_id(SHEET_GID)
-            
             raw_values = sheet.get_all_values()
             
             if not raw_values:
                 return sheet, pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
 
-            # 動態尋找標題列
             header_idx = -1
             for i, row in enumerate(raw_values):
                 if '食材' in row and '價格' in row:
@@ -116,7 +111,10 @@ def load_data_from_gsheets():
             else:
                 return sheet, pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
         except Exception as e:
+            # 加上追蹤器，印出完整的工程錯誤代碼
+            error_details = traceback.format_exc()
             st.error(f"讀取資料失敗：{type(e).__name__} - {str(e)}")
+            st.error(f"詳細錯誤訊息：\n```\n{error_details}\n```")
     return None, pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
 
 def save_data_to_gsheets(sheet, df):
@@ -125,9 +123,12 @@ def save_data_to_gsheets(sheet, df):
         set_with_dataframe(sheet, df, row=1, col=1, include_index=False, include_column_header=True)
         return True
     except Exception as e:
+        error_details = traceback.format_exc()
         st.error(f"寫入雲端時發生錯誤：{e}")
+        st.error(f"詳細錯誤訊息：\n```\n{error_details}\n```")
         return False
 
+# 初始化載入資料
 if 'food_list' not in st.session_state or 'sheet_obj' not in st.session_state:
     sheet_obj, df = load_data_from_gsheets()
     st.session_state.sheet_obj = sheet_obj
