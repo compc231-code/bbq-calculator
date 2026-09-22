@@ -151,7 +151,7 @@ with st.sidebar:
         st.success("✅ 已重新讀取雲端最新狀態！")
         st.rerun()
 
-st.title("🌕 嘉嘉老師的中秋烤肉食材清單")
+st.title("🌕 張家中秋烤肉食材清單")
 st.caption("🟢 目前狀態：【雙向同步啟動】已連線至 Google 雲端")
 st.write("---")
 
