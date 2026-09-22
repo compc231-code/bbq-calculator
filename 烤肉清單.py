@@ -7,7 +7,6 @@ import base64
 st.set_page_config(page_title="張家中秋烤肉食材清單", page_icon="🌕", layout="centered")
 
 # --- 2. 注入高質感 CSS ---
-# 【修改處】改為相對路徑，讓 Render 能在同一個資料夾找到圖片
 BACKGROUND_IMAGE_PATH = "bg.jpg"
 
 def set_background(image_path):
@@ -66,7 +65,6 @@ def set_background(image_path):
 set_background(BACKGROUND_IMAGE_PATH)
 
 # --- 3. 讀取 Excel 的功能 ---
-# 【修改處】改為相對路徑，讓 Render 能在同一個資料夾找到 Excel
 FILE_PATH = "烤肉清單.xlsx"
 
 def load_excel_data():
@@ -116,15 +114,17 @@ with col2:
 
 st.write("---")
 st.header("📋 採買清單")
-st.caption("✨ 提示：可直接在表格內打勾並修改價格，系統會自動儲存並計算！")
+st.caption("✨ 提示：可直接在表格內打勾並修改名稱、內容與價格，系統會自動儲存並計算！")
 
+# 【修改處】拿掉了 disabled=["食材", "內容"]，現在整個表格都可以直接點擊編輯了
 edited_df = st.data_editor(
     st.session_state.food_list,
     column_config={
         "已購買": st.column_config.CheckboxColumn("已買?", default=False),
+        "食材": st.column_config.TextColumn("食材"),
+        "內容": st.column_config.TextColumn("內容"),
         "價格": st.column_config.NumberColumn("價格 (元)", min_value=0, step=10),
     },
-    disabled=["食材", "內容"],
     hide_index=True,
     width='stretch'
 )
