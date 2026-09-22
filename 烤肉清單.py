@@ -34,8 +34,8 @@ def set_background(image_path):
 set_background(BACKGROUND_IMAGE_PATH)
 
 # --- 3. Google Sheets 連線設定 ---
-# 【修改處】請把這串換成你自己的 Google 試算表網址！
-SHEET_URL = "https://docs.google.com/spreadsheets/d/bbq-app@bbq-app-509415.iam.gserviceaccount.com/edit"
+# 【已經替換為你的 Google 試算表網址】
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1K9G5Hu6LB_Q8STeD1utuTAEK0KfVLItR/edit"
 
 @st.cache_resource
 def get_gspread_client():
@@ -52,7 +52,7 @@ def get_gspread_client():
         creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
         return gspread.authorize(creds)
     else:
-        st.error("⚠️ 找不到 Google 授權憑證！")
+        st.error("⚠️ 找不到 Google 授權憑證！請確認是否已在 Render 設定環境變數。")
         return None
 
 def load_data_from_gsheets():
@@ -66,7 +66,8 @@ def load_data_from_gsheets():
                 # 確保型態正確
                 if '已購買' in df.columns:
                     df['已購買'] = df['已購買'].map({'TRUE': True, 'FALSE': False, True: True, False: False}).fillna(False)
-                df['價格'] = pd.to_numeric(df['價格'], errors='coerce').fillna(0).astype(int)
+                if '價格' in df.columns:
+                    df['價格'] = pd.to_numeric(df['價格'], errors='coerce').fillna(0).astype(int)
                 return sheet, df
             else:
                 return sheet, pd.DataFrame(columns=["已購買", "食材", "內容", "價格"])
@@ -148,7 +149,7 @@ with st.form("add_item_form", clear_on_submit=True):
     if submitted:
         if not i_name.strip():
             warning_placeholder.warning("請輸入食材名稱！")
-        elif i_name.strip() in st.session_state.food_list['食材'].values:
+        elif not st.session_state.food_list.empty and i_name.strip() in st.session_state.food_list['食材'].values:
             warning_placeholder.error(f"⚠️ 項目重複，『{i_name}』已在購買清單內！")
         else:
             new_row = pd.DataFrame({"已購買": [True if i_price > 0 else False], "食材": [i_name.strip()], "內容": [i_desc], "價格": [i_price]})
